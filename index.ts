@@ -20,7 +20,6 @@ export async function fetchAvailabilities(): Promise<string[]> {
     const today = moment().format('YYYY-MM-DD');
     url = url.replace(/start_date=\d{4}-\d{2}-\d{2}/, `start_date=${today}`);
 
-
     // Check if the URL is valid
     let parsedUrl: URL;
     try {
@@ -80,31 +79,101 @@ export async function availableAppointment(dates: string[], timespan: number): P
   return '';
 }
 
-export async function sendSlackNotification(date: string): Promise<void> {
-  const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
+export async function sendTelegramNotification(date: string): Promise<void> {
+  const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+  const telegramChatId = process.env.TELEGRAM_CHAT_ID;
   const bookingUrl = process.env.DOCTOR_BOOKING_URL;
 
-  if (!slackWebhookUrl) {
-    throw new Error('The SLACK_WEBHOOK_URL environment variable is not defined.');
+  if (!telegramBotToken) {
+    throw new Error('The TELEGRAM_BOT_TOKEN environment variable is not defined.');
+  }
+
+  if (!telegramChatId) {
+    throw new Error('The TELEGRAM_CHAT_ID environment variable is not defined.');
   }
 
   if (!bookingUrl) {
     throw new Error('The DOCTOR_BOOKING_URL environment variable is not defined.');
   }
 
-  const message = {
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `:pill: An appointment is available on *${date}* :calendar:. You can book it here: ${bookingUrl}`
-        }
-      },
-    ]
-  };
+  // Убедимся, что Chat ID - число
+  const chatId = parseInt(telegramChatId);
+  if (isNaN(chatId)) {
+    throw new Error('The TELEGRAM_CHAT_ID must be a valid number.');
+  }
 
-  await axios.post(slackWebhookUrl, message);
+  // Простое сообщение без Markdown разметки
+  const message = `💊 Доступна запись на ${date} 📅\n\nЗабронируйте здесь: ${bookingUrl}`;
+
+  const url = `https://api.telegram.org/bot${telegramBotToken}/sendMessage`;
+
+  try {
+    const response = await axios.post(url, {
+      chat_id: chatId,
+      text: message
+      // Убрали parse_mode: 'Markdown'
+    });
+    
+    if (response.data.ok) {
+      console.log('Telegram notification sent successfully.');
+    } else {
+      throw new Error(`Telegram API error: ${response.data.description}`);
+    }
+  } catch (error: any) {
+    console.error(`Error sending Telegram notification: ${error.response?.data?.description || error.message}`);
+    throw error;
+  }
+}
+
+export async function sendInitialTelegramNotification(): Promise<void> {
+  const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+  const telegramChatId = process.env.TELEGRAM_CHAT_ID;
+  const bookingUrl = process.env.DOCTOR_BOOKING_URL;
+  const timespan = Number(process.env.TIMESPAN_DAYS || '0');
+  const schedule = process.env.SCHEDULE || '* * * * *';
+
+  if (!telegramBotToken) {
+    console.error('The TELEGRAM_BOT_TOKEN environment variable is not defined.');
+    return;
+  }
+
+  if (!telegramChatId) {
+    console.error('The TELEGRAM_CHAT_ID environment variable is not defined.');
+    return;
+  }
+
+  if (!bookingUrl) {
+    console.error('The DOCTOR_BOOKING_URL environment variable is not defined.');
+    return;
+  }
+
+  // Убедимся, что Chat ID - число
+  const chatId = parseInt(telegramChatId);
+  if (isNaN(chatId)) {
+    console.error('The TELEGRAM_CHAT_ID must be a valid number.');
+    return;
+  }
+
+  // Простое сообщение без Markdown разметки
+  const message = `🤖 Doctolib Appointment Finder запущен!\n\nПроверка расписания: ${schedule}\nПериод поиска: ${timespan} дней\nСсылка для бронирования: ${bookingUrl}\n\nВы будете получать уведомления, когда появятся доступные записи.`;
+
+  const url = `https://api.telegram.org/bot${telegramBotToken}/sendMessage`;
+
+  try {
+    const response = await axios.post(url, {
+      chat_id: chatId,
+      text: message
+      // Убрали parse_mode: 'Markdown'
+    });
+    
+    if (response.data.ok) {
+      console.log('Initial Telegram notification sent successfully.');
+    } else {
+      console.error(`Telegram API error: ${response.data.description}`);
+    }
+  } catch (error: any) {
+    console.error(`Error sending initial Telegram notification: ${error.response?.data?.description || error.message}`);
+  }
 }
 
 // Usage
@@ -121,8 +190,8 @@ async function checkAppointmentAvailability() {
 
     if (date) {
       console.log(`Next available appointment is on: ${date}`);
-      await sendSlackNotification(date).catch((error) => {
-        console.error(`Error while sending Slack notification: ${error}`);
+      await sendTelegramNotification(date).catch((error) => {
+        console.error(`Error while sending Telegram notification: ${error}`);
       });
 
       // Stop the task once an appointment is found
@@ -136,35 +205,6 @@ async function checkAppointmentAvailability() {
   } catch (error) {
     console.error(`Error while checking appointment availability: ${error}`);
   }
-}
-
-export async function sendInitialSlackNotification(): Promise<void> {
-  const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
-  const bookingUrl = process.env.DOCTOR_BOOKING_URL;
-  const timespan = Number(process.env.TIMESPAN_DAYS || '0');
-  const schedule = process.env.SCHEDULE || '* * * * *';
-
-  if (!slackWebhookUrl) {
-    throw new Error('The SLACK_WEBHOOK_URL environment variable is not defined.');
-  }
-
-  if (!bookingUrl) {
-    throw new Error('The DOCTOR_BOOKING_URL environment variable is not defined.');
-  }
-
-  const message = {
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `:robot_face: The Doctolib Appointment Finder has started checking every ${schedule} for available appointments within the next ${timespan} days. You will receive notifications when appointments become available. The booking link is: ${bookingUrl}`
-        }
-      },
-    ]
-  };
-
-  await axios.post(slackWebhookUrl, message);
 }
 
 if (typeof jest !== 'undefined') {
@@ -181,13 +221,15 @@ if (typeof jest !== 'undefined') {
     try {
       task = cron.schedule(schedule, checkAppointmentAvailability);
 
-      sendInitialSlackNotification().catch((error) => {
-        console.error(`Error while sending initial Slack notification: ${error}`);
-      });
+      // Добавим небольшую задержку перед отправкой начального уведомления
+      setTimeout(() => {
+        sendInitialTelegramNotification().catch((error) => {
+          console.error(`Error while sending initial Telegram notification: ${error}`);
+        });
+      }, 2000);
 
     } catch (error) {
       console.error(`Error while scheduling appointment availability check: ${error}`);
     }
   }
 }
-
